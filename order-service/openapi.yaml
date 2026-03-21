@@ -1,0 +1,74 @@
+openapi: 3.0.3
+info:
+  title: Order Service API
+  version: 1.0.0
+  description: Handles order creation and retrieval for the e-commerce platform. Integrates with User Service and Product Service.
+servers:
+  - url: http://localhost:3003
+    description: Local development server
+paths:
+  /health:
+    get:
+      summary: Service Health Check
+      responses:
+        '200':
+          description: OK
+  /orders:
+    post:
+      summary: Create a new order
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - items
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - product_id
+                      - quantity
+                    properties:
+                      product_id:
+                        type: string
+                      quantity:
+                        type: integer
+      responses:
+        '201':
+          description: Order created successfully
+        '400':
+          description: Validation error or insufficient stock
+        '401':
+          description: Unauthorized
+    get:
+      summary: List all orders
+      responses:
+        '200':
+          description: Array of orders
+  /orders/{id}:
+    get:
+      summary: Get an order by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Returns order info
+        '404':
+          description: Order not found
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
