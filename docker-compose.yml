@@ -1,0 +1,114 @@
+# Local development: all 4 microservices + RabbitMQ
+# Usage: docker-compose up -d
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  user-service:
+    build: ./user-service
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      JWT_SECRET: your-jwt-secret-change-in-production
+      MONGO_URI: mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  product-catalog-service:
+    build: ./product-catalog-service
+    ports:
+      - "3002:3002"
+    environment:
+      PORT: 3002
+      MONGO_URI: mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  order-service:
+    build: ./order-service
+    ports:
+      - "3003:3003"
+    environment:
+      PORT: 3003
+      USER_SERVICE_URL: http://user-service:3001
+      PRODUCT_SERVICE_URL: http://product-catalog-service:3002
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      MONGO_URI: mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/
+    depends_on:
+      user-service:
+        condition: service_started
+      product-catalog-service:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+
+  notification-service:
+    build: ./notification-service
+    ports:
+      - "3004:3004"
+    environment:
+      SERVER_PORT: 3004
+      USER_SERVICE_URL: http://user-service:3001
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: guest
+      SPRING_RABBITMQ_PASSWORD: guest
+      MONGO_URI: mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/
+    depends_on:
+      user-service:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+
+  payment-service:
+    build: ./payment-service
+    ports:
+      - "3005:3005"
+    environment:
+      PORT: 3005
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      ORDER_SERVICE_URL: http://order-service:3003
+      MONGO_URI: mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/
+    depends_on:
+      order-service:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+
+  client:
+    build: ./client
+    ports:
+      - "3000:3000"
+    environment:
+      USER_SERVICE_URL: http://user-service:3001
+      PRODUCT_SERVICE_URL: http://product-catalog-service:3002
+      ORDER_SERVICE_URL: http://order-service:3003
+      NOTIFICATION_SERVICE_URL: http://notification-service:3004
+      PAYMENT_SERVICE_URL: http://payment-service:3005
+    depends_on:
+      user-service:
+        condition: service_started
+      product-catalog-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
