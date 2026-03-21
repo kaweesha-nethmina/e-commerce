@@ -1,0 +1,28 @@
+openapi: 3.0.3
+info:
+  title: Notification Service API
+  version: 1.0.0
+  description: Event-driven microservice that consumes RabbitMQ events and exposes notifications via REST.
+servers:
+  - url: http://localhost:3004
+    description: Local development server
+paths:
+  /health:
+    get:
+      summary: Service Health Check
+      responses:
+        '200':
+          description: OK
+  /notifications:
+    get:
+      summary: List notifications
+      description: Returns a list of all user/system notifications, newest first.
+      responses:
+        '200':
+          description: Array of notification objects
+  /notifications/count:
+    get:
+      summary: Get notification count
+      responses:
+        '200':
+          description: Returns total count of notifications
