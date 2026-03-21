@@ -15,6 +15,17 @@ on:
         required: false
         default: ''
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Permissions:
+#   packages: write  → allows GITHUB_TOKEN to push images to GHCR
+#   contents: read   → allows checkout of the repository
+# Without `packages: write`, you get:
+#   "denied: installation not allowed to Write organization package"
+# ─────────────────────────────────────────────────────────────────────────────
+permissions:
+  contents: read
+  packages: write
+
 env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/e-commerce
