@@ -1,54 +1,20 @@
 import type { NextConfig } from "next";
 
+/**
+ * Next.js configuration.
+ *
+ * NOTE: We do NOT use `rewrites()` here for proxying backend services.
+ *
+ * Reason: next.config.ts rewrites are evaluated at BUILD TIME, so
+ * `process.env.SERVICE_URL` values set in Azure Container Apps (runtime env
+ * vars) would be ignored — the rewrite destinations would always compile to
+ * the localhost fallbacks.
+ *
+ * Instead, we use App Router Route Handlers in src/app/api/**\/route.ts which
+ * call `process.env` at REQUEST TIME and correctly pick up runtime env vars.
+ */
 const nextConfig: NextConfig = {
-  async rewrites() {
-    return [
-      {
-        source: '/api/users/:path*',
-        destination: `${process.env.USER_SERVICE_URL || 'http://localhost:3001'}/users/:path*`,
-      },
-      {
-        source: '/api/auth/:path*',
-        destination: `${process.env.USER_SERVICE_URL || 'http://localhost:3001'}/auth/:path*`,
-      },
-      {
-        source: '/api/products/:path*',
-        destination: `${process.env.PRODUCT_SERVICE_URL || 'http://localhost:3002'}/products/:path*`,
-      },
-      {
-        source: '/api/orders/:path*',
-        destination: `${process.env.ORDER_SERVICE_URL || 'http://localhost:3003'}/orders/:path*`,
-      },
-      {
-        source: '/api/health/user',
-        destination: `${process.env.USER_SERVICE_URL || 'http://localhost:3001'}/health`,
-      },
-      {
-        source: '/api/health/product',
-        destination: `${process.env.PRODUCT_SERVICE_URL || 'http://localhost:3002'}/health`,
-      },
-      {
-        source: '/api/health/order',
-        destination: `${process.env.ORDER_SERVICE_URL || 'http://localhost:3003'}/health`,
-      },
-      {
-        source: '/api/health/notification',
-        destination: `${process.env.NOTIFICATION_SERVICE_URL || 'http://localhost:3004'}/health`,
-      },
-      {
-        source: '/api/notifications/:path*',
-        destination: `${process.env.NOTIFICATION_SERVICE_URL || 'http://localhost:3004'}/notifications/:path*`,
-      },
-      {
-        source: '/api/health/payment',
-        destination: `${process.env.PAYMENT_SERVICE_URL || 'http://localhost:3005'}/health`,
-      },
-      {
-        source: '/api/payments/:path*',
-        destination: `${process.env.PAYMENT_SERVICE_URL || 'http://localhost:3005'}/payments/:path*`,
-      },
-    ];
-  },
+  output: 'standalone', // Required for Docker/Azure — produces a self-contained build
 };
 
 export default nextConfig;

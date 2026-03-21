@@ -272,3 +272,42 @@ func GetOrderSummary(c *gin.Context) {
 
 	c.JSON(http.StatusOK, summary)
 }
+
+func DeleteOrder(c *gin.Context) {
+	id := c.Param("id")
+	userID := c.GetHeader("X-User-ID")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Find the order first
+	var order models.Order
+	err := database.OrdersCol.FindOne(ctx, bson.M{"id": id}).Decode(&order)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+		return
+	}
+
+	// Check ownership
+	if userID != "" && order.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "you can only delete your own orders"})
+		return
+	}
+
+	// Only allow deletion of cancelled or completed orders
+	if order.Status != "cancelled" && order.Status != "completed" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": fmt.Sprintf("cannot delete order with status '%s'. Only cancelled or completed orders can be deleted", order.Status),
+		})
+		return
+	}
+
+	_, err = database.OrdersCol.DeleteOne(ctx, bson.M{"id": id})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete order"})
+		return
+	}
+
+	log.Printf("Order %s deleted by user %s", id, userID)
+	c.JSON(http.StatusOK, gin.H{"message": "order deleted successfully", "id": id})
+}
