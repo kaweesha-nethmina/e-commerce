@@ -49,7 +49,8 @@ az containerapp create \
   --env-vars \
     MONGO_URI="mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/" \
     PORT="3001" \
-    JWT_SECRET="your-jwt-secret"
+    JWT_SECRET="your-jwt-secret" \
+    RABBITMQ_URL="amqp://guest:guest@rabbitmq:5672/"
 echo "✅ User Service deployed"
 
 # ── Product Catalog Service (Python/FastAPI, port 3002) ───────────────────────
