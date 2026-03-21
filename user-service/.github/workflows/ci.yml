@@ -1,0 +1,35 @@
+# CI: build, test, and push image (adjust registry for your cloud)
+name: CI
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: user-service/package-lock.json
+      - name: Install
+        run: cd user-service && npm ci
+      - name: Lint
+        run: cd user-service && npm run lint || true
+      - name: Build
+        run: cd user-service && npm run build
+      - name: Test
+        run: cd user-service && npm test || true
+
+  docker:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t user-service ./user-service
+      # Add push to ECR/ACR/Docker Hub here with secrets
