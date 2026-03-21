@@ -1,0 +1,63 @@
+openapi: 3.0.3
+info:
+  title: Product Catalog Service API
+  version: 1.0.0
+  description: Manages product stock and handles catalog queries. Fast API auto-generates this, but here is the static contract.
+servers:
+  - url: http://localhost:3002
+    description: Local development server
+paths:
+  /health:
+    get:
+      summary: Health Check
+      responses:
+        '200':
+          description: OK
+  /products:
+    get:
+      summary: List all products
+      responses:
+        '200':
+          description: Array of products
+  /products/{id}:
+    get:
+      summary: Get a product by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Returns product info
+        '404':
+          description: Product not found
+  /products/check-stock:
+    post:
+      summary: Check stock availability
+      description: Internal endpoint used by Order Service to atomically verify stock before checkout.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - items
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - product_id
+                      - quantity
+                    properties:
+                      product_id:
+                        type: string
+                      quantity:
+                        type: integer
+      responses:
+        '200':
+          description: Stock status array and total boolean
