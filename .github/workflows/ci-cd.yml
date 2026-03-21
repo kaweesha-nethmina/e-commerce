@@ -1,0 +1,323 @@
+name: CI/CD — Build & Deploy to Azure Container Apps
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Triggers:
+#   - Push to `main` branch  → builds only the services that changed
+#   - Manual trigger (workflow_dispatch) → lets you choose which service to deploy
+# ─────────────────────────────────────────────────────────────────────────────
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'Service to deploy (leave empty to deploy all changed)'
+        required: false
+        default: ''
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/e-commerce
+  RESOURCE_GROUP: e-commerce-rg
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REQUIRED GITHUB SECRETS (Settings → Secrets and variables → Actions):
+#
+#   AZURE_CREDENTIALS  — Azure service principal JSON (see setup guide)
+#
+# GITHUB_TOKEN is automatic — used to push Docker images to GHCR.
+# ─────────────────────────────────────────────────────────────────────────────
+
+jobs:
+  # ── Job 1: Detect which service directories changed ─────────────────────────
+  detect-changes:
+    name: Detect Changed Services
+    runs-on: ubuntu-latest
+    outputs:
+      client:               ${{ steps.filter.outputs.client }}
+      user_service:         ${{ steps.filter.outputs.user_service }}
+      product_catalog:      ${{ steps.filter.outputs.product_catalog }}
+      order_service:        ${{ steps.filter.outputs.order_service }}
+      payment_service:      ${{ steps.filter.outputs.payment_service }}
+      notification_service: ${{ steps.filter.outputs.notification_service }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect changed paths
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            client:
+              - 'client/**'
+            user_service:
+              - 'user-service/**'
+            product_catalog:
+              - 'product-catalog-service/**'
+            order_service:
+              - 'order-service/**'
+            payment_service:
+              - 'payment-service/**'
+            notification_service:
+              - 'notification-service/**'
+
+  # ── Reusable build+push+deploy steps (inline per service) ───────────────────
+  # Each service is an independent job so they run in PARALLEL.
+
+  # ── client (Next.js) ────────────────────────────────────────────────────────
+  deploy-client:
+    name: Deploy client
+    needs: detect-changes
+    if: |
+      needs.detect-changes.outputs.client == 'true' ||
+      github.event.inputs.service == 'client' ||
+      github.event.inputs.service == 'all'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./client
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/client:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Update Azure Container App
+        run: |
+          az containerapp update \
+            --name client \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.IMAGE_PREFIX }}/client:latest \
+            --set-env-vars \
+              USER_SERVICE_URL="http://user-service" \
+              PRODUCT_SERVICE_URL="http://product-catalog-service" \
+              ORDER_SERVICE_URL="http://order-service" \
+              PAYMENT_SERVICE_URL="http://payment-service" \
+              NOTIFICATION_SERVICE_URL="http://notification-service"
+
+  # ── user-service (Node.js) ───────────────────────────────────────────────────
+  deploy-user-service:
+    name: Deploy user-service
+    needs: detect-changes
+    if: |
+      needs.detect-changes.outputs.user_service == 'true' ||
+      github.event.inputs.service == 'user-service' ||
+      github.event.inputs.service == 'all'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./user-service
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/user-service:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Update Azure Container App
+        run: |
+          az containerapp update \
+            --name user-service \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.IMAGE_PREFIX }}/user-service:latest
+
+  # ── product-catalog-service (Python/FastAPI) ──────────────────────────────────
+  deploy-product-catalog:
+    name: Deploy product-catalog-service
+    needs: detect-changes
+    if: |
+      needs.detect-changes.outputs.product_catalog == 'true' ||
+      github.event.inputs.service == 'product-catalog-service' ||
+      github.event.inputs.service == 'all'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./product-catalog-service
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/product-catalog-service:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Update Azure Container App
+        run: |
+          az containerapp update \
+            --name product-catalog-service \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.IMAGE_PREFIX }}/product-catalog-service:latest
+
+  # ── order-service (Go/Gin) ───────────────────────────────────────────────────
+  deploy-order-service:
+    name: Deploy order-service
+    needs: detect-changes
+    if: |
+      needs.detect-changes.outputs.order_service == 'true' ||
+      github.event.inputs.service == 'order-service' ||
+      github.event.inputs.service == 'all'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./order-service
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/order-service:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Update Azure Container App
+        run: |
+          az containerapp update \
+            --name order-service \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.IMAGE_PREFIX }}/order-service:latest
+
+  # ── payment-service (Node.js) ────────────────────────────────────────────────
+  deploy-payment-service:
+    name: Deploy payment-service
+    needs: detect-changes
+    if: |
+      needs.detect-changes.outputs.payment_service == 'true' ||
+      github.event.inputs.service == 'payment-service' ||
+      github.event.inputs.service == 'all'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./payment-service
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/payment-service:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Update Azure Container App
+        run: |
+          az containerapp update \
+            --name payment-service \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.IMAGE_PREFIX }}/payment-service:latest
+
+  # ── notification-service (Spring Boot/Java) ──────────────────────────────────
+  deploy-notification-service:
+    name: Deploy notification-service
+    needs: detect-changes
+    if: |
+      needs.detect-changes.outputs.notification_service == 'true' ||
+      github.event.inputs.service == 'notification-service' ||
+      github.event.inputs.service == 'all'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./notification-service
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/notification-service:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Update Azure Container App
+        run: |
+          az containerapp update \
+            --name notification-service \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.IMAGE_PREFIX }}/notification-service:latest
