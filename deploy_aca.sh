@@ -139,6 +139,21 @@ az containerapp create \
     SPRING_RABBITMQ_PASSWORD="guest"
 echo "✅ Notification Service deployed"
 
+# ── API Gateway (Nginx, port 80) ───────────────────────────────────────────────
+echo "🚪 Deploying API Gateway..."
+az containerapp create \
+  --name api-gateway \
+  --resource-group $RG \
+  --environment $ENV \
+  --image $REGISTRY/$REGISTRY_USER/e-commerce/api-gateway:latest \
+  --registry-server $REGISTRY \
+  --registry-username $REGISTRY_USER \
+  --registry-password $GITHUB_PAT \
+  --target-port 80 \
+  --ingress internal \
+  --min-replicas 1
+echo "✅ API Gateway deployed"
+
 # ── Client (Next.js, port 3000) ───────────────────────────────────────────────
 # ONLY external-facing service.
 # Next.js `next.config.ts` rewrites run SERVER-SIDE inside the ACA environment,
@@ -156,11 +171,7 @@ CLIENT_FQDN=$(az containerapp create \
   --ingress external \
   --min-replicas 1 \
   --env-vars \
-    USER_SERVICE_URL="http://user-service" \
-    PRODUCT_SERVICE_URL="http://product-catalog-service" \
-    ORDER_SERVICE_URL="http://order-service" \
-    PAYMENT_SERVICE_URL="http://payment-service" \
-    NOTIFICATION_SERVICE_URL="http://notification-service" \
+    API_GATEWAY_URL="http://api-gateway" \
   --query properties.configuration.ingress.fqdn -o tsv)
 
 echo ""

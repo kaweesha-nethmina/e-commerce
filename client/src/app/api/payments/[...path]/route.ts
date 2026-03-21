@@ -1,10 +1,10 @@
 import { NextRequest } from 'next/server';
 import { proxyToService, serviceUrl } from '@/lib/proxy';
 
-// Routes:  /api/payments/* → PAYMENT_SERVICE_URL/payments/*
+// Routes:  /api/payments/* → API_GATEWAY_URL/payments/*
 const handler = (req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) =>
   params.then(({ path }) =>
-    proxyToService(req, serviceUrl('PAYMENT_SERVICE_URL', 3005), `/payments/${path.join('/')}`)
+    proxyToService(req, serviceUrl('API_GATEWAY_URL', 80), `/payments/${path.join('/')}`)
   );
 
 export const GET = handler;
