@@ -21,6 +21,8 @@ const categoryGradients: Record<string, string> = {
     accessories: 'linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(234, 88, 12, 0.12))',
 };
 
+const CATEGORIES = ['widgets', 'gadgets', 'electronics', 'accessories'];
+
 export default function ProductsPage() {
     const [products, setProducts] = useState<Product[]>([]);
     const [categories, setCategories] = useState<string[]>([]);
@@ -43,6 +45,21 @@ export default function ProductsPage() {
     const [reviewComment, setReviewComment] = useState('');
     const [submittingReview, setSubmittingReview] = useState(false);
 
+    // Create Product modal state
+    const [showCreateModal, setShowCreateModal] = useState(false);
+    const [creatingProduct, setCreatingProduct] = useState(false);
+    const [newProduct, setNewProduct] = useState({
+        name: '',
+        description: '',
+        category: 'electronics',
+        price: '',
+        stock: '',
+        image_url: '',
+    });
+
+    // Delete state
+    const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
+
     const fetchProducts = useCallback(() => {
         setLoading(true);
         const params: Record<string, any> = {};
@@ -57,7 +74,6 @@ export default function ProductsPage() {
                 const q: Record<string, number> = {};
                 data.forEach((p) => (q[p.id] = 1));
                 setQuantities(q);
-                // Fetch reviews for all products
                 data.forEach((p) => {
                     productApi.getReviews(p.id).then((r) => {
                         setReviews((prev) => ({ ...prev, [p.id]: r }));
@@ -96,7 +112,6 @@ export default function ProductsPage() {
         setSubmittingReview(true);
         try {
             await productApi.createReview(reviewModal, reviewRating, reviewComment, userId, userName || 'Anonymous');
-            // Refresh reviews
             const r = await productApi.getReviews(reviewModal);
             setReviews((prev) => ({ ...prev, [reviewModal]: r }));
             setToast({ type: 'success', message: 'Review submitted!' });
@@ -107,6 +122,50 @@ export default function ProductsPage() {
             setToast({ type: 'error', message: err.message || 'Failed to submit review' });
         } finally {
             setSubmittingReview(false);
+        }
+    };
+
+    const handleCreateProduct = async () => {
+        if (!newProduct.name || !newProduct.category || !newProduct.price || !newProduct.stock) {
+            setToast({ type: 'error', message: 'Please fill in all required fields.' });
+            return;
+        }
+        setCreatingProduct(true);
+        try {
+            const created = await productApi.create(
+                {
+                    name: newProduct.name,
+                    description: newProduct.description,
+                    category: newProduct.category,
+                    price: parseFloat(newProduct.price),
+                    stock: parseInt(newProduct.stock),
+                    image_url: newProduct.image_url,
+                },
+                token || ''
+            );
+            setToast({ type: 'success', message: `Product "${created.name}" created successfully!` });
+            setShowCreateModal(false);
+            setNewProduct({ name: '', description: '', category: 'electronics', price: '', stock: '', image_url: '' });
+            fetchProducts();
+            productApi.categories().then((c) => setCategories(c.categories)).catch(() => { });
+        } catch (err: any) {
+            setToast({ type: 'error', message: err.message || 'Failed to create product' });
+        } finally {
+            setCreatingProduct(false);
+        }
+    };
+
+    const handleDeleteProduct = async (productId: string, productName: string) => {
+        if (!confirm(`Delete "${productName}"? This cannot be undone.`)) return;
+        setDeletingProductId(productId);
+        try {
+            await productApi.delete(productId, token || '');
+            setToast({ type: 'success', message: `"${productName}" deleted successfully.` });
+            setProducts((prev) => prev.filter((p) => p.id !== productId));
+        } catch (err: any) {
+            setToast({ type: 'error', message: err.message || 'Failed to delete product' });
+        } finally {
+            setDeletingProductId(null);
         }
     };
 
@@ -161,10 +220,24 @@ export default function ProductsPage() {
             {toast && <Toast type={toast.type} message={toast.message} onClose={() => setToast(null)} />}
 
             <div className="page-header fade-in">
-                <h1 className="page-title">Products</h1>
-                <p className="page-subtitle">
-                    Browse our catalog • Powered by Python / FastAPI on port 3002
-                </p>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+                    <div>
+                        <h1 className="page-title">Products</h1>
+                        <p className="page-subtitle">
+                            Browse our catalog • Powered by Python / FastAPI on port 3002
+                        </p>
+                    </div>
+                    {isAuthenticated && (
+                        <button
+                            className="btn btn-primary"
+                            onClick={() => setShowCreateModal(true)}
+                            id="add-product-btn"
+                            style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+                        >
+                            <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>＋</span> Add Product
+                        </button>
+                    )}
+                </div>
             </div>
 
             {/* Search & Filter Bar */}
@@ -248,7 +321,6 @@ export default function ProductsPage() {
                                         {product.description}
                                     </div>
                                 )}
-                                {/* Rating display */}
                                 {productReview && productReview.count > 0 && (
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                                         {renderStars(Math.round(productReview.average_rating))}
@@ -288,16 +360,33 @@ export default function ProductsPage() {
                                         Add to Cart
                                     </button>
                                 </div>
-                                {/* Review button */}
                                 {isAuthenticated && (
-                                    <button
-                                        className="btn btn-ghost btn-sm"
-                                        style={{ width: '100%', marginTop: 8, fontSize: '0.78rem' }}
-                                        onClick={() => setReviewModal(product.id)}
-                                        id={`review-btn-${product.id}`}
-                                    >
-                                        ⭐ Write a Review
-                                    </button>
+                                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                                        <button
+                                            className="btn btn-ghost btn-sm"
+                                            style={{ flex: 1, fontSize: '0.78rem' }}
+                                            onClick={() => setReviewModal(product.id)}
+                                            id={`review-btn-${product.id}`}
+                                        >
+                                            ⭐ Write a Review
+                                        </button>
+                                        <button
+                                            className="btn btn-sm"
+                                            style={{
+                                                background: 'rgba(239,68,68,0.1)',
+                                                color: '#f87171',
+                                                border: '1px solid rgba(239,68,68,0.25)',
+                                                fontSize: '0.78rem',
+                                                opacity: deletingProductId === product.id ? 0.6 : 1,
+                                            }}
+                                            onClick={() => handleDeleteProduct(product.id, product.name)}
+                                            disabled={deletingProductId === product.id}
+                                            id={`delete-product-${product.id}`}
+                                            title="Delete this product"
+                                        >
+                                            {deletingProductId === product.id ? '...' : '🗑️'}
+                                        </button>
+                                    </div>
                                 )}
                             </div>
                         </div>
@@ -312,6 +401,15 @@ export default function ProductsPage() {
                             <div className="empty-state-icon">📦</div>
                             <h3>No products found</h3>
                             <p>{search || selectedCategory ? 'Try adjusting your search or filters.' : 'The product catalog is empty.'}</p>
+                            {isAuthenticated && !search && !selectedCategory && (
+                                <button
+                                    className="btn btn-primary"
+                                    style={{ marginTop: 16 }}
+                                    onClick={() => setShowCreateModal(true)}
+                                >
+                                    + Add First Product
+                                </button>
+                            )}
                             {(search || selectedCategory) && (
                                 <button
                                     className="btn btn-primary"
@@ -321,6 +419,192 @@ export default function ProductsPage() {
                                     Clear Filters
                                 </button>
                             )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ===== Create Product Modal ===== */}
+            {showCreateModal && (
+                <div style={{
+                    position: 'fixed', inset: 0, zIndex: 1000,
+                    background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+                }}>
+                    <div className="card fade-in" style={{ maxWidth: 520, width: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
+                        <div className="card-header" style={{ position: 'sticky', top: 0, background: 'var(--bg-card)', zIndex: 1 }}>
+                            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>📦 Add New Product</h3>
+                            <button
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => !creatingProduct && setShowCreateModal(false)}
+                                disabled={creatingProduct}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+                            {/* Name */}
+                            <div>
+                                <label className="form-label" style={{ marginBottom: 6, display: 'block', fontWeight: 500 }}>
+                                    Product Name <span style={{ color: 'var(--error)' }}>*</span>
+                                </label>
+                                <input
+                                    className="form-input"
+                                    type="text"
+                                    placeholder="e.g. Wireless Mouse Pro"
+                                    value={newProduct.name}
+                                    onChange={(e) => setNewProduct((p) => ({ ...p, name: e.target.value }))}
+                                    disabled={creatingProduct}
+                                    id="new-product-name"
+                                    style={{ width: '100%' }}
+                                />
+                            </div>
+
+                            {/* Description */}
+                            <div>
+                                <label className="form-label" style={{ marginBottom: 6, display: 'block', fontWeight: 500 }}>
+                                    Description
+                                </label>
+                                <textarea
+                                    className="form-input"
+                                    rows={3}
+                                    placeholder="Brief product description..."
+                                    value={newProduct.description}
+                                    onChange={(e) => setNewProduct((p) => ({ ...p, description: e.target.value }))}
+                                    disabled={creatingProduct}
+                                    id="new-product-description"
+                                    style={{ width: '100%', resize: 'vertical' }}
+                                />
+                            </div>
+
+                            {/* Category */}
+                            <div>
+                                <label className="form-label" style={{ marginBottom: 6, display: 'block', fontWeight: 500 }}>
+                                    Category <span style={{ color: 'var(--error)' }}>*</span>
+                                </label>
+                                <select
+                                    className="form-input"
+                                    value={newProduct.category}
+                                    onChange={(e) => setNewProduct((p) => ({ ...p, category: e.target.value }))}
+                                    disabled={creatingProduct}
+                                    id="new-product-category"
+                                    style={{ width: '100%' }}
+                                >
+                                    {CATEGORIES.map((cat) => (
+                                        <option key={cat} value={cat}>
+                                            {categoryEmojis[cat]} {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Price & Stock side by side */}
+                            <div style={{ display: 'flex', gap: 16 }}>
+                                <div style={{ flex: 1 }}>
+                                    <label className="form-label" style={{ marginBottom: 6, display: 'block', fontWeight: 500 }}>
+                                        Price ($) <span style={{ color: 'var(--error)' }}>*</span>
+                                    </label>
+                                    <input
+                                        className="form-input"
+                                        type="number"
+                                        min="0.01"
+                                        step="0.01"
+                                        placeholder="29.99"
+                                        value={newProduct.price}
+                                        onChange={(e) => setNewProduct((p) => ({ ...p, price: e.target.value }))}
+                                        disabled={creatingProduct}
+                                        id="new-product-price"
+                                        style={{ width: '100%' }}
+                                    />
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <label className="form-label" style={{ marginBottom: 6, display: 'block', fontWeight: 500 }}>
+                                        Stock (units) <span style={{ color: 'var(--error)' }}>*</span>
+                                    </label>
+                                    <input
+                                        className="form-input"
+                                        type="number"
+                                        min="0"
+                                        step="1"
+                                        placeholder="100"
+                                        value={newProduct.stock}
+                                        onChange={(e) => setNewProduct((p) => ({ ...p, stock: e.target.value }))}
+                                        disabled={creatingProduct}
+                                        id="new-product-stock"
+                                        style={{ width: '100%' }}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Image URL */}
+                            <div>
+                                <label className="form-label" style={{ marginBottom: 6, display: 'block', fontWeight: 500 }}>
+                                    Image URL <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span>
+                                </label>
+                                <input
+                                    className="form-input"
+                                    type="url"
+                                    placeholder="https://example.com/image.jpg"
+                                    value={newProduct.image_url}
+                                    onChange={(e) => setNewProduct((p) => ({ ...p, image_url: e.target.value }))}
+                                    disabled={creatingProduct}
+                                    id="new-product-image-url"
+                                    style={{ width: '100%' }}
+                                />
+                            </div>
+
+                            {/* Preview badge */}
+                            {newProduct.name && (
+                                <div style={{
+                                    padding: '12px 16px',
+                                    background: 'var(--bg-secondary)',
+                                    borderRadius: 10,
+                                    border: '1px solid var(--border)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 12,
+                                }}>
+                                    <span style={{ fontSize: '2rem' }}>{categoryEmojis[newProduct.category] || '📦'}</span>
+                                    <div>
+                                        <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{newProduct.name || 'Product Name'}</div>
+                                        <div style={{ color: 'var(--accent-primary)', fontWeight: 700 }}>
+                                            {newProduct.price ? `$${parseFloat(newProduct.price).toFixed(2)}` : '$0.00'}
+                                            <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.8rem', marginLeft: 8 }}>
+                                                {newProduct.stock || 0} units
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Actions */}
+                            <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
+                                <button
+                                    className="btn btn-ghost"
+                                    style={{ flex: 1 }}
+                                    onClick={() => !creatingProduct && setShowCreateModal(false)}
+                                    disabled={creatingProduct}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    className="btn btn-primary"
+                                    style={{ flex: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                                    onClick={handleCreateProduct}
+                                    disabled={creatingProduct}
+                                    id="create-product-submit-btn"
+                                >
+                                    {creatingProduct ? (
+                                        <>
+                                            <div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
+                                            Creating...
+                                        </>
+                                    ) : (
+                                        '✓ Create Product'
+                                    )}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

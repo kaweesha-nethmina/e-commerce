@@ -263,6 +263,12 @@ export const orderApi = {
       headers: authHeaders(token),
     }),
 
+  delete: (id: string, token: string) =>
+    request<{ message: string; id: string }>(`${BASE}/api/orders/${id}`, {
+      method: 'DELETE',
+      headers: authHeaders(token),
+    }),
+
   health: () =>
     request<HealthStatus>(`${BASE}/api/health/order`),
 };

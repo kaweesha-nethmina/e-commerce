@@ -39,6 +39,7 @@ func main() {
 	r.GET("/orders/:id", handlers.GetOrder)
 	r.PUT("/orders/:id/status", handlers.UpdateOrderStatus)
 	r.POST("/orders/:id/cancel", handlers.CancelOrder)
+	r.DELETE("/orders/:id", handlers.DeleteOrder)
 
 	port := getEnv("PORT", "3003")
 	r.Run(":" + port)

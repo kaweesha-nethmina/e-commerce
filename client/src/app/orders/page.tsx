@@ -15,6 +15,7 @@ export default function OrdersPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+    const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
     const [selectedOrderForPayment, setSelectedOrderForPayment] = useState<Order | null>(null);
     const [isProcessingPayment, setIsProcessingPayment] = useState(false);
     const { token, userId, isAuthenticated } = useAuth();
@@ -66,6 +67,24 @@ export default function OrdersPage() {
             setSummary(updatedSummary);
         } catch (err: any) {
             setToast({ type: 'error', message: err.message || 'Failed to cancel order' });
+        }
+    };
+
+    const handleDeleteOrder = async (orderId: string) => {
+        if (!confirm('Permanently delete this order? This cannot be undone.')) return;
+        setDeletingOrderId(orderId);
+        try {
+            await orderApi.delete(orderId, token || '');
+            setToast({ type: 'success', message: 'Order deleted successfully' });
+            // Remove from local state instantly
+            setOrders((prev) => prev.filter((o) => o.id !== orderId));
+            // Refresh summary
+            const updatedSummary = await orderApi.summary(token || '').catch(() => null);
+            setSummary(updatedSummary);
+        } catch (err: any) {
+            setToast({ type: 'error', message: err.message || 'Failed to delete order' });
+        } finally {
+            setDeletingOrderId(null);
         }
     };
 
@@ -258,6 +277,23 @@ export default function OrdersPage() {
                                                         onClick={() => handleCancelOrder(order.id)}
                                                     >
                                                         Cancel
+                                                    </button>
+                                                )}
+                                                {(order.status === 'cancelled' || order.status === 'completed') && (
+                                                    <button
+                                                        className="btn btn-sm"
+                                                        style={{
+                                                            background: 'rgba(239,68,68,0.12)',
+                                                            color: '#f87171',
+                                                            border: '1px solid rgba(239,68,68,0.3)',
+                                                            opacity: deletingOrderId === order.id ? 0.6 : 1,
+                                                            cursor: deletingOrderId === order.id ? 'not-allowed' : 'pointer',
+                                                        }}
+                                                        onClick={() => handleDeleteOrder(order.id)}
+                                                        disabled={deletingOrderId === order.id}
+                                                        title="Permanently delete this order"
+                                                    >
+                                                        {deletingOrderId === order.id ? '...' : '🗑️ Delete'}
                                                     </button>
                                                 )}
                                             </td>

@@ -1,6 +1,10 @@
 # Local development: all 4 microservices + RabbitMQ
 # Usage: docker-compose up -d
 
+networks:
+  e-commerce-network:
+    driver: bridge
+
 services:
   rabbitmq:
     image: rabbitmq:3-management
@@ -15,6 +19,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - e-commerce-network
 
   user-service:
     build: ./user-service
@@ -29,6 +35,8 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+    networks:
+      - e-commerce-network
 
   product-catalog-service:
     build: ./product-catalog-service
@@ -41,6 +49,8 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+    networks:
+      - e-commerce-network
 
   order-service:
     build: ./order-service
@@ -59,6 +69,8 @@ services:
         condition: service_started
       rabbitmq:
         condition: service_healthy
+    networks:
+      - e-commerce-network
 
   notification-service:
     build: ./notification-service
@@ -77,6 +89,8 @@ services:
         condition: service_started
       rabbitmq:
         condition: service_healthy
+    networks:
+      - e-commerce-network
 
   payment-service:
     build: ./payment-service
@@ -92,6 +106,8 @@ services:
         condition: service_started
       rabbitmq:
         condition: service_healthy
+    networks:
+      - e-commerce-network
 
   client:
     build: ./client
@@ -112,3 +128,5 @@ services:
         condition: service_started
       notification-service:
         condition: service_started
+    networks:
+      - e-commerce-network
