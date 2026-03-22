@@ -11,6 +11,7 @@ import (
 	"order-service/internal/models"
 )
 
+
 var (
 	userServiceURL    = getEnv("USER_SERVICE_URL", "http://localhost:3001")
 	productServiceURL = getEnv("PRODUCT_SERVICE_URL", "http://localhost:3002")
