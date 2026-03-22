@@ -17,6 +17,16 @@ jobs:
         with:
           fetch-depth: 0  # SonarCloud requires full git history
 
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Compile Notification Service (Java classes for Sonar)
+        run: cd notification-service && mvn clean compile -DskipTests
+
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@master
         env:
