@@ -4,7 +4,7 @@ import { proxyToService, serviceUrl } from '@/lib/proxy';
 // Routes:  /api/auth/* → API_GATEWAY_URL/auth/*
 const handler = (req: NextRequest, { params }: { params: Promise<{ path?: string[] }> }) =>
   params.then(({ path }) =>
-    proxyToService(req, serviceUrl('API_GATEWAY_URL', 80), `/auth/${(path || []).join('/')}`)
+    proxyToService(req, serviceUrl('API_GATEWAY_URL', 80), `/auth${path && path.length ? '/' + path.join('/') : ''}`)
   );
 
 export const GET = handler;
