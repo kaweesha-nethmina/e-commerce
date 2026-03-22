@@ -1,0 +1,52 @@
+name: DevSecOps SAST Scanning
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+jobs:
+  # SonarCloud Job: Scans for code bugs, vulnerabilities, and code smells
+  sonarcloud-analysis:
+    name: SonarCloud SAST
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # SonarCloud requires full git history
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Provided automatically by GitHub
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}    # You need to create this in GitHub Secrets
+
+  # Snyk Job: Scans the Node.js open source dependencies for CVEs
+  snyk-dependency-scan:
+    name: Snyk Dependency Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      # Snyk needs to install dependencies first to scan them effectively
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          
+      - name: Install User Service Dependencies
+        run: cd user-service && npm install
+        
+      - name: Install Payment Service Dependencies
+        run: cd payment-service && npm install
+
+      # Run the Snyk Action to scan package.json files for vulnerabilities
+      - name: Run Snyk to check for vulnerabilities
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }} # You need to create this in GitHub Secrets
+        with:
+          args: --all-projects
+          command: test
