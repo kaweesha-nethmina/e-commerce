@@ -42,7 +42,24 @@ export const processManualPayment = async (req: Request, res: Response) => {
         
         let payment = await Payment.findOne({ order_id });
         if (payment && payment.status === 'completed') {
-            return res.status(400).json({ error: 'Payment already completed for this order' });
+            // Auto-heal stuck orders: if payment was already done but order wasn't updated
+            try {
+                const ORDER_SERVICE_URL = process.env.ORDER_SERVICE_URL || 'http://localhost:3003';
+                await axios.put(`${ORDER_SERVICE_URL}/orders/${order_id}/status`, { status: 'paid' });
+            } catch (err) { }
+            
+            // Re-publish event to ensure notification service catches it
+            try {
+                const channel = getChannel();
+                const exchange = 'payment_events_exchange';
+                await channel.assertExchange(exchange, 'fanout', { durable: true });
+                channel.publish(exchange, '', Buffer.from(JSON.stringify({
+                    event: 'payment.completed', order_id: payment.order_id, user_id: payment.user_id,
+                    amount: payment.amount, status: payment.status, transaction_id: payment.transaction_id
+                })));
+            } catch (err) { }
+
+            return res.status(200).json({ message: 'Payment recovered and completed', payment });
         }
 
         if (!payment) {
