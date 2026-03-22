@@ -106,6 +106,13 @@ export default function OrdersPage() {
             setToast({ type: 'success', message: 'Payment processed successfully!' });
             
             setSelectedOrderForPayment(null);
+
+            // Refresh orders list so the Pay Now button disappears
+            try {
+                const token = localStorage.getItem('token') || '';
+                const updated = await orderApi.list(token);
+                setOrders(updated);
+            } catch {}
             
             // Navigate to notifications page directly
             setTimeout(() => {
@@ -279,7 +286,7 @@ export default function OrdersPage() {
                                                         Cancel
                                                     </button>
                                                 )}
-                                                {(order.status === 'cancelled' || order.status === 'completed') && (
+                                                {(order.status === 'cancelled' || order.status === 'completed' || order.status === 'paid') && (
                                                     <button
                                                         className="btn btn-sm"
                                                         style={{

@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import axios from 'axios';
 import Payment from '../models/paymentModel';
 import { getChannel } from '../config/rabbitmq';
 
@@ -58,6 +59,15 @@ export const processManualPayment = async (req: Request, res: Response) => {
         }
 
         await payment.save();
+
+        // Update order status to 'paid' in the order service
+        try {
+            const ORDER_SERVICE_URL = process.env.ORDER_SERVICE_URL || 'http://localhost:3003';
+            await axios.put(`${ORDER_SERVICE_URL}/orders/${order_id}/status`, { status: 'paid' });
+            console.log(`[x] Updated order ${order_id} status to 'paid'`);
+        } catch (orderErr: any) {
+            console.error(`[!] Failed to update order status: ${orderErr.message}`);
+        }
 
         const channel = getChannel();
         const exchange = 'payment_events_exchange';

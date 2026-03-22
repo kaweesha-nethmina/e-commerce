@@ -294,10 +294,10 @@ func DeleteOrder(c *gin.Context) {
 		return
 	}
 
-	// Only allow deletion of cancelled or completed orders
-	if order.Status != "cancelled" && order.Status != "completed" {
+	// Only allow deletion of cancelled, completed, or paid orders
+	if order.Status != "cancelled" && order.Status != "completed" && order.Status != "paid" {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": fmt.Sprintf("cannot delete order with status '%s'. Only cancelled or completed orders can be deleted", order.Status),
+			"error": fmt.Sprintf("cannot delete order with status '%s'. Only cancelled, completed, or paid orders can be deleted", order.Status),
 		})
 		return
 	}
