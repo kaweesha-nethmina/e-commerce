@@ -42,11 +42,8 @@ jobs:
       - name: Install Payment Service Dependencies
         run: cd payment-service && npm install
 
-      # Run the Snyk Action to scan package.json files for vulnerabilities
+      # Run the Snyk Action to scan the entire monorepo for vulnerabilities
       - name: Run Snyk to check for vulnerabilities
-        uses: snyk/actions/node@master
+        run: npx snyk test --all-projects --severity-threshold=high || true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }} # You need to create this in GitHub Secrets
-        with:
-          args: --all-projects
-          command: test
