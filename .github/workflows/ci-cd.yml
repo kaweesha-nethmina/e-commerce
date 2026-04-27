@@ -31,7 +31,7 @@ env:
   IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/e-commerce
   RESOURCE_GROUP: e-commerce-rg
   ACA_ENV: e-commerce-env
-  LOCATION: eastus
+  LOCATION: eastasia
 
 # ─────────────────────────────────────────────────────────────────────────────
 # REQUIRED GITHUB SECRETS (Settings → Secrets and variables → Actions):
