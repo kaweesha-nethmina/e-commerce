@@ -19,8 +19,7 @@ on:
 # Permissions:
 #   packages: write  → allows GITHUB_TOKEN to push images to GHCR
 #   contents: read   → allows checkout of the repository
-# Without `packages: write`, you get:
-#   "denied: installation not allowed to Write organization package"
+#   id-token: write  → allows OIDC federation with Azure (no AZURE_CREDENTIALS needed)
 # ─────────────────────────────────────────────────────────────────────────────
 permissions:
   contents: read
@@ -31,14 +30,16 @@ env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/e-commerce
   RESOURCE_GROUP: e-commerce-rg
+  ACA_ENV: e-commerce-env
+  LOCATION: eastus
 
 # ─────────────────────────────────────────────────────────────────────────────
 # REQUIRED GITHUB SECRETS (Settings → Secrets and variables → Actions):
 #
-#   AZURE_CREDENTIALS  — Azure service principal JSON
-#   CR_PAT             — GitHub Personal Access Token with write:packages scope
-#                        (needed because GITHUB_TOKEN cannot push to packages
-#                         that were originally created with a personal PAT)
+#   AZURE_CLIENT_ID      — Managed Identity client ID (OIDC login)
+#   AZURE_TENANT_ID      — Azure tenant ID
+#   AZURE_SUBSCRIPTION_ID— Azure subscription ID
+#   CR_PAT               — GitHub Personal Access Token with write:packages scope
 # ─────────────────────────────────────────────────────────────────────────────
 
 jobs:
@@ -77,13 +78,60 @@ jobs:
             api_gateway:
               - 'api-gateway/**'
 
-  # ── Reusable build+push+deploy steps (inline per service) ───────────────────
-  # Each service is an independent job so they run in PARALLEL.
+  # ── Job 2: Ensure ACA Environment + RabbitMQ exist ──────────────────────────
+  setup-infra:
+    name: Ensure ACA Infrastructure
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    steps:
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Create Container Apps Environment (if not exists)
+        run: |
+          if ! az containerapp env show \
+              --name ${{ env.ACA_ENV }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --output none 2>/dev/null; then
+            echo "Creating Container Apps Environment..."
+            az containerapp env create \
+              --name ${{ env.ACA_ENV }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --location ${{ env.LOCATION }}
+          else
+            echo "Container Apps Environment already exists, skipping."
+          fi
+
+      - name: Create RabbitMQ Container App (if not exists)
+        run: |
+          if ! az containerapp show \
+              --name rabbitmq \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --output none 2>/dev/null; then
+            echo "Creating RabbitMQ..."
+            az containerapp create \
+              --name rabbitmq \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --environment ${{ env.ACA_ENV }} \
+              --image rabbitmq:3-management \
+              --target-port 5672 \
+              --exposed-port 5672 \
+              --ingress internal \
+              --transport tcp \
+              --min-replicas 1 \
+              --max-replicas 1
+          else
+            echo "RabbitMQ already exists, skipping."
+          fi
 
   # ── client (Next.js) ────────────────────────────────────────────────────────
   deploy-client:
     name: Deploy client
-    needs: detect-changes
+    needs: [detect-changes, setup-infra]
     if: |
       needs.detect-changes.outputs.client == 'true' ||
       github.event.inputs.service == 'client' ||
@@ -110,35 +158,50 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Azure Login
+      - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Set GHCR registry credentials
+      - name: Create or Update Container App
         run: |
-          az containerapp registry set \
-            --name client \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --server ghcr.io \
-            --username kaweesha-nethmina \
-            --password ${{ secrets.CR_PAT }}
-
-      - name: Update Azure Container App
-        run: |
-          az containerapp update \
-            --name client \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --image ${{ env.IMAGE_PREFIX }}/client:latest \
-            --set-env-vars \
-              API_GATEWAY_URL="http://api-gateway"
+          if az containerapp show --name client --resource-group ${{ env.RESOURCE_GROUP }} --output none 2>/dev/null; then
+            echo "Updating existing client app..."
+            az containerapp registry set \
+              --name client \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --server ghcr.io \
+              --username kaweesha-nethmina \
+              --password ${{ secrets.CR_PAT }}
+            az containerapp update \
+              --name client \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --image ${{ env.IMAGE_PREFIX }}/client:latest \
+              --set-env-vars \
+                API_GATEWAY_URL="http://api-gateway"
+          else
+            echo "Creating client app..."
+            az containerapp create \
+              --name client \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --environment ${{ env.ACA_ENV }} \
+              --image ${{ env.IMAGE_PREFIX }}/client:latest \
+              --registry-server ghcr.io \
+              --registry-username kaweesha-nethmina \
+              --registry-password ${{ secrets.CR_PAT }} \
+              --target-port 3000 \
+              --ingress external \
+              --min-replicas 1 \
+              --env-vars \
+                API_GATEWAY_URL="http://api-gateway"
+          fi
 
   # ── user-service (Node.js) ───────────────────────────────────────────────────
   deploy-user-service:
     name: Deploy user-service
-    needs: detect-changes
+    needs: [detect-changes, setup-infra]
     if: |
       needs.detect-changes.outputs.user_service == 'true' ||
       github.event.inputs.service == 'user-service' ||
@@ -165,33 +228,51 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Azure Login
+      - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Set GHCR registry credentials
+      - name: Create or Update Container App
         run: |
-          az containerapp registry set \
-            --name user-service \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --server ghcr.io \
-            --username kaweesha-nethmina \
-            --password ${{ secrets.CR_PAT }}
-
-      - name: Update Azure Container App
-        run: |
-          az containerapp update \
-            --name user-service \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --image ${{ env.IMAGE_PREFIX }}/user-service:latest
+          if az containerapp show --name user-service --resource-group ${{ env.RESOURCE_GROUP }} --output none 2>/dev/null; then
+            echo "Updating existing user-service..."
+            az containerapp registry set \
+              --name user-service \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --server ghcr.io \
+              --username kaweesha-nethmina \
+              --password ${{ secrets.CR_PAT }}
+            az containerapp update \
+              --name user-service \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --image ${{ env.IMAGE_PREFIX }}/user-service:latest
+          else
+            echo "Creating user-service..."
+            az containerapp create \
+              --name user-service \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --environment ${{ env.ACA_ENV }} \
+              --image ${{ env.IMAGE_PREFIX }}/user-service:latest \
+              --registry-server ghcr.io \
+              --registry-username kaweesha-nethmina \
+              --registry-password ${{ secrets.CR_PAT }} \
+              --target-port 3001 \
+              --ingress internal \
+              --min-replicas 1 \
+              --env-vars \
+                MONGO_URI="mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/" \
+                PORT="3001" \
+                JWT_SECRET="your-jwt-secret" \
+                RABBITMQ_URL="amqp://guest:guest@rabbitmq:5672/"
+          fi
 
   # ── product-catalog-service (Python/FastAPI) ──────────────────────────────────
   deploy-product-catalog:
     name: Deploy product-catalog-service
-    needs: detect-changes
+    needs: [detect-changes, setup-infra]
     if: |
       needs.detect-changes.outputs.product_catalog == 'true' ||
       github.event.inputs.service == 'product-catalog-service' ||
@@ -218,33 +299,51 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Azure Login
+      - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Set GHCR registry credentials
+      - name: Create or Update Container App
         run: |
-          az containerapp registry set \
-            --name product-catalog-service \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --server ghcr.io \
-            --username kaweesha-nethmina \
-            --password ${{ secrets.CR_PAT }}
-
-      - name: Update Azure Container App
-        run: |
-          az containerapp update \
-            --name product-catalog-service \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --image ${{ env.IMAGE_PREFIX }}/product-catalog-service:latest
+          if az containerapp show --name product-catalog-service --resource-group ${{ env.RESOURCE_GROUP }} --output none 2>/dev/null; then
+            echo "Updating existing product-catalog-service..."
+            az containerapp registry set \
+              --name product-catalog-service \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --server ghcr.io \
+              --username kaweesha-nethmina \
+              --password ${{ secrets.CR_PAT }}
+            az containerapp update \
+              --name product-catalog-service \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --image ${{ env.IMAGE_PREFIX }}/product-catalog-service:latest
+          else
+            echo "Creating product-catalog-service..."
+            az containerapp create \
+              --name product-catalog-service \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --environment ${{ env.ACA_ENV }} \
+              --image ${{ env.IMAGE_PREFIX }}/product-catalog-service:latest \
+              --registry-server ghcr.io \
+              --registry-username kaweesha-nethmina \
+              --registry-password ${{ secrets.CR_PAT }} \
+              --target-port 3002 \
+              --ingress internal \
+              --min-replicas 1 \
+              --env-vars \
+                MONGO_URI="mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/" \
+                PORT="3002" \
+                DB_NAME="ctse_products" \
+                RABBITMQ_URL="amqp://guest:guest@rabbitmq:5672/"
+          fi
 
   # ── order-service (Go/Gin) ───────────────────────────────────────────────────
   deploy-order-service:
     name: Deploy order-service
-    needs: detect-changes
+    needs: [detect-changes, setup-infra]
     if: |
       needs.detect-changes.outputs.order_service == 'true' ||
       github.event.inputs.service == 'order-service' ||
@@ -271,33 +370,52 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Azure Login
+      - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Set GHCR registry credentials
+      - name: Create or Update Container App
         run: |
-          az containerapp registry set \
-            --name order-service \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --server ghcr.io \
-            --username kaweesha-nethmina \
-            --password ${{ secrets.CR_PAT }}
-
-      - name: Update Azure Container App
-        run: |
-          az containerapp update \
-            --name order-service \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --image ${{ env.IMAGE_PREFIX }}/order-service:latest
+          if az containerapp show --name order-service --resource-group ${{ env.RESOURCE_GROUP }} --output none 2>/dev/null; then
+            echo "Updating existing order-service..."
+            az containerapp registry set \
+              --name order-service \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --server ghcr.io \
+              --username kaweesha-nethmina \
+              --password ${{ secrets.CR_PAT }}
+            az containerapp update \
+              --name order-service \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --image ${{ env.IMAGE_PREFIX }}/order-service:latest
+          else
+            echo "Creating order-service..."
+            az containerapp create \
+              --name order-service \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --environment ${{ env.ACA_ENV }} \
+              --image ${{ env.IMAGE_PREFIX }}/order-service:latest \
+              --registry-server ghcr.io \
+              --registry-username kaweesha-nethmina \
+              --registry-password ${{ secrets.CR_PAT }} \
+              --target-port 3003 \
+              --ingress internal \
+              --min-replicas 1 \
+              --env-vars \
+                MONGO_URI="mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/" \
+                PORT="3003" \
+                USER_SERVICE_URL="http://user-service" \
+                PRODUCT_SERVICE_URL="http://product-catalog-service" \
+                RABBITMQ_URL="amqp://guest:guest@rabbitmq:5672/"
+          fi
 
   # ── payment-service (Node.js) ────────────────────────────────────────────────
   deploy-payment-service:
     name: Deploy payment-service
-    needs: detect-changes
+    needs: [detect-changes, setup-infra]
     if: |
       needs.detect-changes.outputs.payment_service == 'true' ||
       github.event.inputs.service == 'payment-service' ||
@@ -324,33 +442,50 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Azure Login
+      - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Set GHCR registry credentials
+      - name: Create or Update Container App
         run: |
-          az containerapp registry set \
-            --name payment-service \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --server ghcr.io \
-            --username kaweesha-nethmina \
-            --password ${{ secrets.CR_PAT }}
-
-      - name: Update Azure Container App
-        run: |
-          az containerapp update \
-            --name payment-service \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --image ${{ env.IMAGE_PREFIX }}/payment-service:latest
+          if az containerapp show --name payment-service --resource-group ${{ env.RESOURCE_GROUP }} --output none 2>/dev/null; then
+            echo "Updating existing payment-service..."
+            az containerapp registry set \
+              --name payment-service \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --server ghcr.io \
+              --username kaweesha-nethmina \
+              --password ${{ secrets.CR_PAT }}
+            az containerapp update \
+              --name payment-service \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --image ${{ env.IMAGE_PREFIX }}/payment-service:latest
+          else
+            echo "Creating payment-service..."
+            az containerapp create \
+              --name payment-service \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --environment ${{ env.ACA_ENV }} \
+              --image ${{ env.IMAGE_PREFIX }}/payment-service:latest \
+              --registry-server ghcr.io \
+              --registry-username kaweesha-nethmina \
+              --registry-password ${{ secrets.CR_PAT }} \
+              --target-port 3005 \
+              --ingress internal \
+              --min-replicas 1 \
+              --env-vars \
+                MONGO_URI="mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/" \
+                PORT="3005" \
+                RABBITMQ_URL="amqp://guest:guest@rabbitmq:5672/"
+          fi
 
   # ── notification-service (Spring Boot/Java) ──────────────────────────────────
   deploy-notification-service:
     name: Deploy notification-service
-    needs: detect-changes
+    needs: [detect-changes, setup-infra]
     if: |
       needs.detect-changes.outputs.notification_service == 'true' ||
       github.event.inputs.service == 'notification-service' ||
@@ -377,33 +512,54 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Azure Login
+      - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Set GHCR registry credentials
+      - name: Create or Update Container App
         run: |
-          az containerapp registry set \
-            --name notification-service \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --server ghcr.io \
-            --username kaweesha-nethmina \
-            --password ${{ secrets.CR_PAT }}
-
-      - name: Update Azure Container App
-        run: |
-          az containerapp update \
-            --name notification-service \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --image ${{ env.IMAGE_PREFIX }}/notification-service:latest
+          if az containerapp show --name notification-service --resource-group ${{ env.RESOURCE_GROUP }} --output none 2>/dev/null; then
+            echo "Updating existing notification-service..."
+            az containerapp registry set \
+              --name notification-service \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --server ghcr.io \
+              --username kaweesha-nethmina \
+              --password ${{ secrets.CR_PAT }}
+            az containerapp update \
+              --name notification-service \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --image ${{ env.IMAGE_PREFIX }}/notification-service:latest
+          else
+            echo "Creating notification-service..."
+            az containerapp create \
+              --name notification-service \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --environment ${{ env.ACA_ENV }} \
+              --image ${{ env.IMAGE_PREFIX }}/notification-service:latest \
+              --registry-server ghcr.io \
+              --registry-username kaweesha-nethmina \
+              --registry-password ${{ secrets.CR_PAT }} \
+              --target-port 3004 \
+              --ingress internal \
+              --min-replicas 1 \
+              --env-vars \
+                MONGO_URI="mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/" \
+                SERVER_PORT="3004" \
+                USER_SERVICE_URL="http://user-service" \
+                SPRING_RABBITMQ_HOST="rabbitmq" \
+                SPRING_RABBITMQ_PORT="5672" \
+                SPRING_RABBITMQ_USERNAME="guest" \
+                SPRING_RABBITMQ_PASSWORD="guest"
+          fi
 
   # ── api-gateway (Nginx) ──────────────────────────────────────────────────────
   deploy-api-gateway:
     name: Deploy api-gateway
-    needs: detect-changes
+    needs: [detect-changes, setup-infra]
     if: |
       needs.detect-changes.outputs.api_gateway == 'true' ||
       github.event.inputs.service == 'all' ||
@@ -411,16 +567,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GitHub Container Registry
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.CR_PAT }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
 
       - name: Build and push api-gateway image
         uses: docker/build-push-action@v5
@@ -432,25 +586,38 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Azure Login
+      - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Set GHCR registry credentials
+      - name: Create or Update Container App
         run: |
-          az containerapp registry set \
-            --name api-gateway \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --server ghcr.io \
-            --username kaweesha-nethmina \
-            --password ${{ secrets.CR_PAT }}
-
-      - name: Update Azure Container App
-        run: |
-          az containerapp update \
-            --name api-gateway \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --image ${{ env.IMAGE_PREFIX }}/api-gateway:latest
+          if az containerapp show --name api-gateway --resource-group ${{ env.RESOURCE_GROUP }} --output none 2>/dev/null; then
+            echo "Updating existing api-gateway..."
+            az containerapp registry set \
+              --name api-gateway \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --server ghcr.io \
+              --username kaweesha-nethmina \
+              --password ${{ secrets.CR_PAT }}
+            az containerapp update \
+              --name api-gateway \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --image ${{ env.IMAGE_PREFIX }}/api-gateway:latest
+          else
+            echo "Creating api-gateway..."
+            az containerapp create \
+              --name api-gateway \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --environment ${{ env.ACA_ENV }} \
+              --image ${{ env.IMAGE_PREFIX }}/api-gateway:latest \
+              --registry-server ghcr.io \
+              --registry-username kaweesha-nethmina \
+              --registry-password ${{ secrets.CR_PAT }} \
+              --target-port 80 \
+              --ingress internal \
+              --min-replicas 1
+          fi
