@@ -12,7 +12,7 @@ interface ServiceHealth {
   port: string;
   tech: string;
 }
-
+//com
 export default function DashboardPage() {
   const { isAuthenticated, token } = useAuth();
   const [services, setServices] = useState<ServiceHealth[]>([
