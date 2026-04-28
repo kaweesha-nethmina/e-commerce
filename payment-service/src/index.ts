@@ -1,3 +1,4 @@
+// Force redeploy for environment variables update
 import dotenv from 'dotenv';
 dotenv.config();
 
