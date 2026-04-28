@@ -112,6 +112,7 @@ az containerapp create \
   --env-vars \
     MONGO_URI="mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/" \
     PORT="3005" \
+    ORDER_SERVICE_URL="http://order-service" \
     RABBITMQ_URL="amqp://guest:guest@rabbitmq:5672/"
 echo "✅ Payment Service deployed"
 
@@ -130,7 +131,7 @@ az containerapp create \
   --ingress internal \
   --min-replicas 1 \
   --env-vars \
-    MONGO_URI="mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/" \
+    MONGO_URI="mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/ctse_notifications?retryWrites=true&w=majority" \
     SERVER_PORT="3004" \
     USER_SERVICE_URL="http://user-service" \
     SPRING_RABBITMQ_HOST="rabbitmq" \

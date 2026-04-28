@@ -113,6 +113,8 @@ services:
     build: ./api-gateway
     ports:
       - "8080:80"
+    volumes:
+      - ./api-gateway/nginx.dev.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       user-service:
         condition: service_started
