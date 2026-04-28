@@ -248,7 +248,12 @@ jobs:
             az containerapp update \
               --name user-service \
               --resource-group ${{ env.RESOURCE_GROUP }} \
-              --image ${{ env.IMAGE_PREFIX }}/user-service:latest
+              --image ${{ env.IMAGE_PREFIX }}/user-service:latest \
+              --set-env-vars \
+                MONGO_URI="mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/" \
+                PORT="3001" \
+                JWT_SECRET="your-jwt-secret" \
+                RABBITMQ_URL="amqp://guest:guest@rabbitmq:5672/"
           else
             echo "Creating user-service..."
             az containerapp create \
@@ -319,7 +324,12 @@ jobs:
             az containerapp update \
               --name product-catalog-service \
               --resource-group ${{ env.RESOURCE_GROUP }} \
-              --image ${{ env.IMAGE_PREFIX }}/product-catalog-service:latest
+              --image ${{ env.IMAGE_PREFIX }}/product-catalog-service:latest \
+              --set-env-vars \
+                MONGO_URI="mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/" \
+                PORT="3002" \
+                DB_NAME="ctse_products" \
+                RABBITMQ_URL="amqp://guest:guest@rabbitmq:5672/"
           else
             echo "Creating product-catalog-service..."
             az containerapp create \
@@ -390,7 +400,13 @@ jobs:
             az containerapp update \
               --name order-service \
               --resource-group ${{ env.RESOURCE_GROUP }} \
-              --image ${{ env.IMAGE_PREFIX }}/order-service:latest
+              --image ${{ env.IMAGE_PREFIX }}/order-service:latest \
+              --set-env-vars \
+                MONGO_URI="mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/" \
+                PORT="3003" \
+                USER_SERVICE_URL="http://user-service" \
+                PRODUCT_SERVICE_URL="http://product-catalog-service" \
+                RABBITMQ_URL="amqp://guest:guest@rabbitmq:5672/"
           else
             echo "Creating order-service..."
             az containerapp create \
@@ -462,7 +478,12 @@ jobs:
             az containerapp update \
               --name payment-service \
               --resource-group ${{ env.RESOURCE_GROUP }} \
-              --image ${{ env.IMAGE_PREFIX }}/payment-service:latest
+              --image ${{ env.IMAGE_PREFIX }}/payment-service:latest \
+              --set-env-vars \
+                MONGO_URI="mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/" \
+                PORT="3005" \
+                ORDER_SERVICE_URL="http://order-service" \
+                RABBITMQ_URL="amqp://guest:guest@rabbitmq:5672/"
           else
             echo "Creating payment-service..."
             az containerapp create \
@@ -533,7 +554,15 @@ jobs:
             az containerapp update \
               --name notification-service \
               --resource-group ${{ env.RESOURCE_GROUP }} \
-              --image ${{ env.IMAGE_PREFIX }}/notification-service:latest
+              --image ${{ env.IMAGE_PREFIX }}/notification-service:latest \
+              --set-env-vars \
+                MONGO_URI="mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/ctse_notifications?retryWrites=true&w=majority" \
+                SERVER_PORT="3004" \
+                USER_SERVICE_URL="http://user-service" \
+                SPRING_RABBITMQ_HOST="rabbitmq" \
+                SPRING_RABBITMQ_PORT="5672" \
+                SPRING_RABBITMQ_USERNAME="guest" \
+                SPRING_RABBITMQ_PASSWORD="guest"
           else
             echo "Creating notification-service..."
             az containerapp create \
