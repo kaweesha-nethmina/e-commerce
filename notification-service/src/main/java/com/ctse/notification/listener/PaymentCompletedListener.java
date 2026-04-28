@@ -11,11 +11,17 @@ import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 /**
  * Consumes payment.completed events from RabbitMQ (published by Payment Service).
  * Creates a "Payment Successful" notification instead of an "Order Created" one.
+ *
+ * NOTE: The Payment Service publishes raw JSON bytes via Node.js amqplib
+ * without setting content_type headers. We accept the raw AMQP Message
+ * and extract body bytes manually to avoid Spring's SimpleMessageConverter
+ * type mismatch issues.
  */
 @Component
 public class PaymentCompletedListener {
@@ -31,8 +37,12 @@ public class PaymentCompletedListener {
     }
 
     @RabbitListener(queues = RabbitConfig.NOTIFICATION_PAYMENT_COMPLETED_QUEUE)
-    public void handlePaymentCompleted(String message) {
+    public void handlePaymentCompleted(org.springframework.amqp.core.Message rawMessage) {
         try {
+            // Extract raw JSON bytes — works regardless of publisher content-type header
+            String message = new String(rawMessage.getBody(), StandardCharsets.UTF_8);
+            log.info("Raw payment.completed message: {}", message);
+
             PaymentCompletedEvent event = objectMapper.readValue(message, PaymentCompletedEvent.class);
             log.info("Received payment.completed: orderId={}, userId={}, amount={}",
                     event.getOrderId(), event.getUserId(), event.getAmount());
@@ -66,7 +76,7 @@ public class PaymentCompletedListener {
             log.info("Notification stored: Payment completed for order {} by {} (email: {})",
                     event.getOrderId(), userName, email);
         } catch (Exception e) {
-            log.error("Failed to process payment.completed: {}", e.getMessage());
+            log.error("Failed to process payment.completed: {}", e.getMessage(), e);
         }
     }
 }

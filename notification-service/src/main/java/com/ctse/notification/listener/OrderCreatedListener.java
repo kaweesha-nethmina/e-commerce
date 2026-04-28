@@ -11,12 +11,20 @@ import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 /**
  * Consumes order.created events from RabbitMQ (published by Order Service).
  * Calls User Service to get user details for notification content.
  * Stores notifications in NotificationStore for frontend retrieval.
+ *
+ * NOTE: The Order Service is written in Go and publishes raw JSON bytes
+ * with content_type "application/json". Spring AMQP's SimpleMessageConverter
+ * does NOT convert "application/json" to String — it only does so for
+ * "text/plain". To handle messages from non-Java publishers reliably,
+ * we accept the raw org.springframework.amqp.core.Message and extract
+ * the body bytes ourselves.
  */
 @Component
 public class OrderCreatedListener {
@@ -32,8 +40,12 @@ public class OrderCreatedListener {
     }
 
     @RabbitListener(queues = RabbitConfig.NOTIFICATION_ORDER_CREATED_QUEUE)
-    public void handleOrderCreated(String message) {
+    public void handleOrderCreated(org.springframework.amqp.core.Message rawMessage) {
         try {
+            // Extract raw JSON bytes — works regardless of publisher content-type header
+            String message = new String(rawMessage.getBody(), StandardCharsets.UTF_8);
+            log.info("Raw order.created message: {}", message);
+
             OrderCreatedEvent event = objectMapper.readValue(message, OrderCreatedEvent.class);
             log.info("Received order.created: orderId={}, userId={}", event.getOrderId(), event.getUserId());
 
@@ -66,7 +78,7 @@ public class OrderCreatedListener {
             log.info("Notification stored: Order {} created for {} (email: {}). Items: {}",
                     event.getOrderId(), userName, email, event.getItems());
         } catch (Exception e) {
-            log.error("Failed to process order.created: {}", e.getMessage());
+            log.error("Failed to process order.created: {}", e.getMessage(), e);
         }
     }
 }

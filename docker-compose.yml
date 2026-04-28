@@ -83,7 +83,7 @@ services:
       SPRING_RABBITMQ_PORT: 5672
       SPRING_RABBITMQ_USERNAME: guest
       SPRING_RABBITMQ_PASSWORD: guest
-      MONGO_URI: mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/
+      MONGO_URI: mongodb+srv://kaweesha:17420@myatlasclusteredu.dubkafb.mongodb.net/ctse_notifications?retryWrites=true&w=majority
     depends_on:
       user-service:
         condition: service_started
@@ -109,16 +109,10 @@ services:
     networks:
       - e-commerce-network
 
-  client:
-    build: ./client
+  api-gateway:
+    build: ./api-gateway
     ports:
-      - "3000:3000"
-    environment:
-      USER_SERVICE_URL: http://user-service:3001
-      PRODUCT_SERVICE_URL: http://product-catalog-service:3002
-      ORDER_SERVICE_URL: http://order-service:3003
-      NOTIFICATION_SERVICE_URL: http://notification-service:3004
-      PAYMENT_SERVICE_URL: http://payment-service:3005
+      - "8080:80"
     depends_on:
       user-service:
         condition: service_started
@@ -127,6 +121,20 @@ services:
       order-service:
         condition: service_started
       notification-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
+    networks:
+      - e-commerce-network
+
+  client:
+    build: ./client
+    ports:
+      - "3000:3000"
+    environment:
+      API_GATEWAY_URL: http://api-gateway:80
+    depends_on:
+      api-gateway:
         condition: service_started
     networks:
       - e-commerce-network
